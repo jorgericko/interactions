@@ -18,21 +18,241 @@ library(ggpubr)
 
 
 
+
+
+
 #load combined data
 data_acids_0<-read.csv("data_acids_A_B.csv", comment="") #Combined data
-data_acids_f1=filter(data_acids_0,rep !="D")
+
+
+# Define the conversion factors (gCOD per g of acid)
+# Ensure the names match the labels in your 'acid' column (e.g., C2, C3, etc.)
+cod_factors <- c(
+  "C2" = 1.07,
+  "C3" = 1.51,
+  "ISOC4" = 1.82, # Isobutyric
+  "C4" = 1.82,  # n-Butyric
+  "ISOC5" = 2.04, # Isovaleric
+  "C5" = 2.04,  # n-Valeric
+  "ISOC6" = 2.21, # Isocaproic
+  "C6" = 2.21,  # n-Caproic
+  "ISOC7" = 2.34, # Isoheptanoic
+  "C7" = 2.34   # Heptanoic 
+) 
+
+data_acids_00 <- data_acids_0 %>%
+  mutate(conc_gCOD_L = conc_gL * cod_factors[acid])
+
+
+data_acids_f1=filter(data_acids_00,rep !="D")
 # data_acids_f1=data_acids_0
 data_acids_f2=filter(data_acids_f1,rep !="INOC")
 data_acids_f3=filter(data_acids_f2,T!=55)
 data_acids_f4=filter(data_acids_f3,day != 9.7)%>%
   filter(between(day, 0, 13))  %>% filter(T!=55)
 
-data_acids <- pivot_wider(data_acids_f4, names_from = acid, values_from = conc_gL)
+
+
+#############################
+#### Data in gCOD/L ########
+################################
+data_acids_f5 <- data_acids_f4 %>%
+  select(-conc_gL)
+
+data_acids_COD <- pivot_wider(data_acids_f5, names_from = acid, values_from = conc_gCOD_L)
+
+data_acids_COD[is.na(data_acids_COD)] = 0
+data_acids_COD$total <- rowSums(data_acids_COD[,15:23])
+data_acids_COD$day <- as.numeric(data_acids_COD$day)
+data_acids_COD=as.data.frame(data_acids_COD)
+data_acids_COD$pH <- as.factor(data_acids_COD$pH)
+
+
+# Change here if you want to plot concentrations
+all_data_acids_stacked_COD<-(data_acids_COD %>% pivot_longer(
+  cols = C2:total,
+  names_to = c("acid"),
+  values_to = "conc_gCOD_L"))
+
+
+# all_data_acids_stacked<-(data_acids %>% pivot_longer(
+#   cols = C2:total,
+#   names_to = c("acid"),
+#   values_to = "yield"))
+#  
+# filtered_sd <- all_data_acids_stacked[!all_data_acids_stacked$acid %in% c("ISOC4", "ISOC5", "ISOC6", "C7"), ]
+filtered_sd_COD <- all_data_acids_stacked_COD[!all_data_acids_stacked_COD$acid %in% c("ISOC4", "ISOC5", "ISOC6"), ]
+filtered_sd_COD$T_with_degree <- paste0(filtered_sd_COD$T, "°C")
+filtered_sd_COD$F_T <- interaction(filtered_sd_COD$T_with_degree, filtered_sd_COD$feedstock,sep = "_")
+filtered_sd_COD$pH_plot <- paste0("pH ",filtered_sd_COD$pH)
+filtered_sd_COD$pH_Inoculum <- interaction(filtered_sd_COD$pH_plot, filtered_sd_COD$inoc,sep = "_")
+str(filtered_sd_COD)
+
+head(filtered_sd_COD)
+
+# 
+# feedstock_load <- 15 #gCOD/L of feed
+# 
+# filtered_sd <- filtered_sd %>%
+#   mutate(yield = conc_gL / feedstock_load)
+# 
+
+
+library(dplyr)
+
+filtered_sd_COD <- filtered_sd_COD %>%
+  mutate(yield = case_when(
+    feedstock == "F" & inoc == "A" ~ conc_gCOD_L / 15.8,  # Specific case: F and A
+    TRUE                           ~ conc_gCOD_L / 15   # Everything else
+  ))
+
+
+
+# Create the ggline plot
+FA_plots_COD = ggline(
+  filtered_sd_COD , 
+  x = "day", 
+  y = "conc_gCOD_L", 
+  numeric.x.axis = TRUE, 
+  xlab = "day", 
+  ylab = "Fatty Acid Concentration  [gCOD/L]", 
+  facet.by = c("acid","F_T"),
+  scales = "free_y",
+  error.plot = "errorbar", 
+  add = c("mean_sd", "jitter"), 
+  add.params = list(size = 0.3), 
+  color = "pH_inoc", 
+  shape = "pH_inoc", 
+  point.size = 1, 
+  palette = c("#A73030FF","#CD534CFF","#8F7700FF", "#EFC000FF","#003C67FF","#0073C2FF")
+) + 
+  theme_pubr() +
+  labs_pubr()+  
+  labs(color = "pH_Inoculum", shape = "pH_Inoculum") + labs_pubr(base_size = 12)+  
+  theme(
+    legend.position = "right",
+    legend.key = element_rect(fill = "white", color = "black"),  # Rectangle legend key
+    legend.key.size = unit(1.5, "lines"),  # Adjust size of legend keys
+    axis.text.x = element_text(size = rel(0.8)),  # X-axis text size (default size * 0.8)
+    axis.text.y = element_text(size = rel(0.8))   # Y-axis text size (default size * 0.8)
+  )+
+  scale_x_continuous(breaks = scales::pretty_breaks(n = 4), labels = scales::number_format(accuracy = 1))+
+  scale_y_continuous(breaks = scales::pretty_breaks(n = 3), labels = scales::number_format(accuracy = 0.2))
+
+
+
+# Create the ggline plot
+FA_plots_yield_COD = ggline(
+  filtered_sd_COD , 
+  x = "day", 
+  y = "yield", 
+  numeric.x.axis = TRUE, 
+  xlab = "day", 
+  ylab = "Fatty Acid Yield  [gCOD/gCODfed]", 
+  facet.by = c("acid","F_T"),
+  scales = "free_y",
+  error.plot = "errorbar", 
+  add = c("mean_sd", "jitter"), 
+  add.params = list(size = 0.3), 
+  color = "pH_inoc", 
+  shape = "pH_inoc", 
+  point.size = 1, 
+  palette = c("#A73030FF","#CD534CFF","#8F7700FF", "#EFC000FF","#003C67FF","#0073C2FF")
+) + 
+  theme_pubr() +
+  labs_pubr()+  
+  labs(color = "pH_Inoculum", shape = "pH_Inoculum") + labs_pubr(base_size = 12)+  
+  theme(
+    legend.position = "right",
+    legend.key = element_rect(fill = "white", color = "black"),  # Rectangle legend key
+    legend.key.size = unit(1.5, "lines"),  # Adjust size of legend keys
+    axis.text.x = element_text(size = rel(0.8)),  # X-axis text size (default size * 0.8)
+    axis.text.y = element_text(size = rel(0.8))   # Y-axis text size (default size * 0.8)
+  )+
+  scale_x_continuous(breaks = scales::pretty_breaks(n = 4), labels = scales::number_format(accuracy = 1))+
+  scale_y_continuous(breaks = scales::pretty_breaks(n = 4), labels = scales::number_format(accuracy = 0.01))
+
+
+
+filtered_sd_total_COD <- filtered_sd_COD[filtered_sd_COD$acid == "total", ]
+
+# Create the ggline plot for total
+FA_plots_yield_total_COD = ggline(
+  filtered_sd_total_COD , 
+  x = "day", 
+  y = "yield", 
+  numeric.x.axis = TRUE, 
+  xlab = "day", 
+  ylab = "Fatty Acid Yield  [gCOD/gCODfed]", 
+  facet.by = c("acid","F_T"),
+  scales = "free_y",
+  error.plot = "errorbar", 
+  add = c("mean_sd", "jitter"), 
+  add.params = list(size = 0.3), 
+  color = "pH_inoc", 
+  shape = "pH_inoc", 
+  point.size = 1, 
+  palette = c("#A73030FF","#CD534CFF","#8F7700FF", "#EFC000FF","#003C67FF","#0073C2FF")
+) + 
+  theme_pubr() +
+  labs_pubr()+  
+  labs(color = "pH_Inoculum", shape = "pH_Inoculum") + labs_pubr(base_size = 12)+  
+  theme(
+    legend.position = "right",
+    legend.key = element_rect(fill = "white", color = "black"),  # Rectangle legend key
+    legend.key.size = unit(1.5, "lines"),  # Adjust size of legend keys
+    axis.text.x = element_text(size = rel(0.8)),  # X-axis text size (default size * 0.8)
+    axis.text.y = element_text(size = rel(0.8))   # Y-axis text size (default size * 0.8)
+  )+
+  scale_x_continuous(breaks = scales::pretty_breaks(n = 4), labels = scales::number_format(accuracy = 1))+
+  scale_y_continuous(breaks = scales::pretty_breaks(n = 4), labels = scales::number_format(accuracy = 0.01))
+
+
+
+print(FA_plots_yield_total_COD)
+
+
+print(FA_plots_yield_COD)
+
+
+print(FA_plots_COD)
+
+
+png("Final_Figures/fig_3_FA_YIELD_corrected_total_2_COD.png", width = 7, height = 3, units = "in", res = 300)
+print(FA_plots_yield_total_COD)
+dev.off()
+
+
+png("Final_Figures/fig_3_FA_YIELD_corrected_COD.png", width = 7, height = 8, units = "in", res = 300)
+print(FA_plots_yield_COD)
+dev.off()
+
+
+
+png("Final_Figures/fig_SX_FA_all_COD.png", width = 14, height = 7, units = "in", res = 300)
+print(FA_plots_COD)
+dev.off()
+
+
+
+
+
+
+
+
+
+
+#############################
+#### Data in g/L ########
+################################
+
+data_acids_f6 <- data_acids_f4 %>%
+  select(-conc_gCOD_L)
+
+data_acids <- pivot_wider(data_acids_f6, names_from = acid, values_from = conc_gL)
 data_acids[is.na(data_acids)] = 0
 data_acids$total <- rowSums(data_acids[,15:23])
 data_acids$day <- as.numeric(data_acids$day)
-
-
 data_acids=as.data.frame(data_acids)
 data_acids$pH <- as.factor(data_acids$pH)
 
@@ -74,6 +294,7 @@ filtered_sd <- filtered_sd %>%
     feedstock == "F" & inoc == "A" ~ conc_gL / 15.8,  # Specific case: F and A
     TRUE                           ~ conc_gL / 15   # Everything else
   ))
+
 
 
 # Create the ggline plot
@@ -141,10 +362,54 @@ FA_plots_yield = ggline(
   scale_y_continuous(breaks = scales::pretty_breaks(n = 4), labels = scales::number_format(accuracy = 0.01))
 
 
+
+filtered_sd_total <- filtered_sd[filtered_sd$acid == "total", ]
+
+# Create the ggline plot for total
+FA_plots_yield_total = ggline(
+  filtered_sd_total , 
+  x = "day", 
+  y = "yield", 
+  numeric.x.axis = TRUE, 
+  xlab = "day", 
+  ylab = "Fatty Acid Yield  [g/gCOD]", 
+  facet.by = c("acid","F_T"),
+  scales = "free_y",
+  error.plot = "errorbar", 
+  add = c("mean_sd", "jitter"), 
+  add.params = list(size = 0.3), 
+  color = "pH_inoc", 
+  shape = "pH_inoc", 
+  point.size = 1, 
+  palette = c("#A73030FF","#CD534CFF","#8F7700FF", "#EFC000FF","#003C67FF","#0073C2FF")
+) + 
+  theme_pubr() +
+  labs_pubr()+  
+  labs(color = "pH_Inoculum", shape = "pH_Inoculum") + labs_pubr(base_size = 12)+  
+  theme(
+    legend.position = "right",
+    legend.key = element_rect(fill = "white", color = "black"),  # Rectangle legend key
+    legend.key.size = unit(1.5, "lines"),  # Adjust size of legend keys
+    axis.text.x = element_text(size = rel(0.8)),  # X-axis text size (default size * 0.8)
+    axis.text.y = element_text(size = rel(0.8))   # Y-axis text size (default size * 0.8)
+  )+
+  scale_x_continuous(breaks = scales::pretty_breaks(n = 4), labels = scales::number_format(accuracy = 1))+
+  scale_y_continuous(breaks = scales::pretty_breaks(n = 4), labels = scales::number_format(accuracy = 0.01))
+
+
+
+print(FA_plots_yield_total)
+
+
 print(FA_plots_yield)
 
 
 print(FA_plots)
+
+
+png("Final_Figures/fig_3_FA_YIELD_corrected_total_2.png", width = 7, height = 3, units = "in", res = 300)
+print(FA_plots_yield_total)
+dev.off()
 
 
 png("Final_Figures/fig_3_FA_YIELD_corrected.png", width = 7, height = 8, units = "in", res = 300)
@@ -168,6 +433,13 @@ dev.off()
 ########################################
 gas_data<-read.csv("gas_data_all.csv", comment="") #Combined data
 gas_data$pH <- as.factor(gas_data$pH)
+gas_data$I <- as.factor(gas_data$I)
+gas_data$T <- as.factor(gas_data$T)
+gas_data$F <- as.factor(gas_data$F)
+
+gas_data$reactor <- paste(gas_data$I, gas_data$T,gas_data$F, gas_data$pH,gas_data$rep,sep = "_")
+gas_data$reactor <- as.factor(gas_data$reactor)
+
 
 gas_stacked<-(gas_data %>% pivot_longer(
   cols = CH4:total,
@@ -193,11 +465,67 @@ gas_p<- ggplot(gas_data_summary_filter, aes(x=I, y=mL, fill=pH)) +
   scale_fill_manual(breaks = c("5","7","9"), values=c("#CD534CFF", "#EFC000FF","#0073C2FF"))+ 
   theme_pubr(legend = c("top"))+ labs_pubr(base_size = 11)
 
+gas_p
 
 png("Final_Figures/fig_2_gas.png", width = 3.3, height = 4.5, units = "in", res = 300)
 print(gas_p)
 dev.off()
 
+library(broom)
+library(dplyr)
+library(ggplot2)
+library(gridExtra)
+library(lme4)
+library(emmeans)
+library(lmerTest)
+library(pbkrtest)
+library(ggpubr)
+
+library(sjPlot)
+library(sjlabelled)
+library(sjmisc)
+library(ggplot2)
+
+
+gas_data=filter(gas_data,T!=55)
+
+# Fit the model
+gas_data$pH <- relevel(gas_data$pH, ref = "7")
+model_CH4 <- lm(CH4~ pH+I+T+F, data = gas_data)
+model_total <- lm(total~ pH+I+T+F, data = gas_data)
+
+summary(model_CH4)
+summary(model_total)
+
+anova(model_CH4)
+anova(model_total)
+
+small_text_theme <- theme(
+  plot.title = element_text(size = 10), # Adjust title size here
+  axis.title = element_text(size = 10),
+  axis.text = element_text(size = 1),
+  legend.title = element_text(size = 8),
+  legend.text = element_text(size = 7)
+)
+
+
+plot_gas_models<-plot_models(model_CH4, model_total, #grid.breaks = TRUE,
+                         axis.labels = c("Feedstock = M","T = 45°C","Inoculum = B", "pH = 9","pH = 5"), 
+                         p.shape = TRUE,
+                         ci.lvl = 0.95,
+                         p.threshold = c(0.05, 0.01, 0.001),
+                         spacing = 0.7,
+                         dot.size = 2,legend.title = "Dependent Variables",
+                         colors = c("blue", "red"),
+                         vline.color = "#061423")+ theme_pubr()+ labs_pubr()+
+  theme(legend.position = "right",panel.grid.minor = element_line(color = "grey90"))+ 
+  labs(y = "Coefficient Effect Size") 
+
+plot_gas_models 
+
+png("Final_Figures/fig_SX_fe_coef_gas.png", width = 6, height = 4, units = "in", res = 300)
+print(plot_gas_models)
+dev.off()
 
 
 
@@ -209,26 +537,49 @@ dev.off()
 ########################################
 ###################
 
-#COMPLETE DATA SUMMARY
 
-data_acids=as.data.frame(data_acids)
-data_acids$pH <- as.factor(data_acids$pH)
 
-library(dplyr) ##need to load again
 
-all_data_acids_stacked<-(data_acids %>% pivot_longer(
-  cols = C2:total,
-  names_to = c("acid"),
-  values_to = "conc_gL"))
+####################
+### DATA SUMMARIES YIELD ###
+######################
+
+
+head(filtered_sd_COD)
+
 
 detach("package:dplyr", unload=TRUE) ### always deatach for data summary
 
-all_data_acids_sum <- data_summary(all_data_acids_stacked, varname="conc_gL",groupnames=c("inoc","pH", "day","acid", "T", "feedstock"))
+all_data_acids_sum_yield_COD <- data_summary(filtered_sd_COD, varname="yield",groupnames=c("inoc","pH", "day","acid", "T", "feedstock"))
+
+library(writexl)
+write_xlsx(all_data_acids_sum_yield_COD, path = "~/Projects/BETO/Experiments_Inoculum/A_B_F_M/Final_Tables/table_SX_fa_summary_yield_COD.xlsx")
+
+
+
+
+
+
+
+####################
+### DATA SUMMARIES CONCENTRATIONS [G/L]  ###
+######################
+
+
+
+detach("package:dplyr", unload=TRUE) ### always deatach for data summary
+
+all_data_acids_sum <- data_summary(filtered_sd, varname="conc_gL",groupnames=c("inoc","pH", "day","acid", "T", "feedstock"))
 
 write.csv(all_data_acids_sum, "~/Projects/BETO/Experiments_Inoculum/A_B_F_M/Final_Tables/all_data_acids_summary.csv", row.names=FALSE)
 library(writexl)
 
 write_xlsx(all_data_acids_sum, path = "~/Projects/BETO/Experiments_Inoculum/A_B_F_M/Final_Tables/table_SX_fa_summary.xlsx")
+
+
+
+
+
 
 #################################
 
